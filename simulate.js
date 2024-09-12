@@ -61,11 +61,7 @@ const randomTrade = async (wallet) => {
         (Math.random() * 10).toFixed(18),
         18
       ); // Sell up to 10 tokens
-      const balanceWei = await provider.getBalance(wallet.address);
-      // Convert the balance to ether
-      const balanceEth = ethers.utils.formatEther(balanceWei);
-      console.log(balanceEth, randomAmountTokens);
-      // await sellTokens(signer, randomAmountTokens);
+      await sellTokens(signer, randomAmountTokens, randomAmountETH);
     }
   } catch (error) {
     console.error(`Error executing trade for wallet ${wallet.address}:`, error);
@@ -103,12 +99,11 @@ const buyTokens = async (signer, amountETH) => {
 };
 
 // Function to sell tokens for ETH
-const sellTokens = async (signer, amountTokens) => {
+const sellTokens = async (signer, amountTokens, randomAmountETH) => {
   const deadline = Math.floor(Date.now() / 1000) + 60 * 10; // 10 minutes deadline
   const path = [TOKEN_ADDRESS, WETH_ADDRESS];
 
   try {
-    // if()
     // Approve Uniswap to spend tokens
     const tokenContract = new ethers.Contract(
       TOKEN_ADDRESS,
@@ -119,43 +114,52 @@ const sellTokens = async (signer, amountTokens) => {
       ],
       signer
     );
-
-    const currentAllowance = await tokenContract.allowance(
-      signer.address,
-      UNISWAP_ROUTER_ADDRESS
-    );
-    if (currentAllowance.lt(amountTokens)) {
-      const approveTx = await tokenContract.approve(
-        UNISWAP_ROUTER_ADDRESS,
-        amountTokens
-      );
-      await approveTx.wait();
-      console.log("Token approval confirmed");
-    }
-
-    // Get expected amount out
-    const [, expectedAmountOut] = await uniswapRouter.getAmountsOut(
-      amountTokens,
-      path
-    );
-    const minAmountOut = expectedAmountOut.mul(95).div(100); // 5% slippage tolerance
-
-    const tx = await uniswapRouter
-      .connect(signer)
-      .swapExactTokensForETH(
-        amountTokens,
-        minAmountOut,
-        path,
+    const currentTokenBalance = await tokenContract.balanceOf(signer.address);
+    if (currentTokenBalance >= amountTokens) {
+      const currentAllowance = await tokenContract.allowance(
         signer.address,
-        deadline,
-        { gasLimit: 300000 }
+        UNISWAP_ROUTER_ADDRESS
       );
+      if (currentAllowance.lt(amountTokens)) {
+        const approveTx = await tokenContract.approve(
+          UNISWAP_ROUTER_ADDRESS,
+          amountTokens
+        );
+        await approveTx.wait();
+        console.log("Token approval confirmed");
+      }
 
-    console.log(`Sell transaction sent: ${tx.hash}`);
-    const receipt = await tx.wait();
-    console.log(
-      `Sell transaction confirmed. Gas used: ${receipt.gasUsed.toString()}`
-    );
+      // Get expected amount out
+      const [, expectedAmountOut] = await uniswapRouter.getAmountsOut(
+        amountTokens,
+        path
+      );
+      const minAmountOut = expectedAmountOut.mul(95).div(100); // 5% slippage tolerance
+
+      const tx = await uniswapRouter
+        .connect(signer)
+        .swapExactTokensForETH(
+          amountTokens,
+          minAmountOut,
+          path,
+          signer.address,
+          deadline,
+          { gasLimit: 300000 }
+        );
+
+      console.log(`Sell transaction sent: ${tx.hash}`);
+      const receipt = await tx.wait();
+      console.log(
+        `Sell transaction confirmed. Gas used: ${receipt.gasUsed.toString()}`
+      );
+    } else {
+      const balanceWei = await provider.getBalance(signer.address);
+
+      if (balanceWei > randomAmountETH) {
+        //buy tokens if no tokens available to sell
+        buyTokens(signer, randomAmountETH);
+      }
+    }
   } catch (error) {
     console.error("Error in sellTokens:", error);
   }
